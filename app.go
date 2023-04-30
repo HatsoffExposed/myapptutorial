@@ -146,33 +146,107 @@ func main() {
 	//using Timeouts
 	c3 := make(chan string, 1)
 
-	go func(){
+	go func() {
 		time.Sleep(2 * time.Second)
 		c3 <- "result 3"
 	}()
 
-	//select cases that print timeout messages 
-	//if the channel doesn't send to res 
+	//select cases that print timeout messages
+	//if the channel doesn't send to res
 	select {
-	case res := <- c3:
+	case res := <-c3:
 		fmt.Println(res)
 	case <-time.After(1 * time.Second):
 		fmt.Println("timeout 1")
 	}
 
 	c4 := make(chan string, 1)
-	go func ()  {
+	go func() {
 		time.Sleep(2 * time.Second)
 		c4 <- "result 4"
 	}()
 
 	select {
-	case res := <- c4 :
+	case res := <-c4:
 		fmt.Println(res)
 	case <-time.After(3 * time.Second):
 		fmt.Println("timeout 2")
 	}
+
+	//closing a channel
+	jobs := make(chan int, 5)
+	done := make(chan bool)
+
+	go func() {
+		for {
+			j, more := <-jobs
+			if more {
+				fmt.Println("received job", j)
+			} else {
+				fmt.Println("received all jobs")
+				done <- true
+				return
+			}
+		}
+	}()
+
+	for j := 1; j <= 3; j++ {
+		jobs <- j
+		fmt.Println("sent job", j)
+	}
+	close(jobs)
+	fmt.Println("Sent all jobs")
+	<-done
+
+	//Ranging over Channels
+	queue := make(chan string, 2)
+	queue <- "one"
+	queue <- "two"
+	close(queue)
+
+	go func() {
+		for v := range queue {
+			fmt.Println(v)
+		}
+	}()
+
+	//Timers
+	timer1 := time.NewTimer(2 * time.Second)
+
+	<-timer1.C
+	//this is a blocking operation like <-done
+	fmt.Println("Timer 1 fired")
+
+	timer2 := time.NewTimer(time.Second)
+	go func() {
+		<-timer2.C
+		fmt.Println("Timer 2 fired")
+	}()
+
+	stop2 := timer2.Stop()
+	if stop2 {
+		fmt.Println("Timer 2 stopped")
 	}
 
+	time.Sleep(2 * time.Second)
 
+	//Using Tickers
+	// ticker := time.NewTicker(500 * time.Millisecond)
+	// dones := make(chan bool)
 
+	// go func() {
+	// 	for {
+	// 		select {
+	// 		case <-done:
+	// 			return
+	// 		case t := <-ticker.C:
+	// 			fmt.Println("Tick at", t)
+	// 		}
+	// 	}
+	// }()
+
+	// time.Sleep(1600 * time.Millisecond)
+	// ticker.Stop()
+	// dones <- true
+	// fmt.Println("Ticker Stopped")
+}

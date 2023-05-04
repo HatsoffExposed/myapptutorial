@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	geometry "forgames/dir2"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -61,6 +63,38 @@ func pong(pings <-chan string, pongs chan<- string) {
 	msg := <-pings
 	pongs <- msg
 }
+
+// Creating A Worker Function
+func worker(id int, jobs <-chan int, results chan<- int) {
+	for j := range jobs {
+		fmt.Println("worker", id, "started job", j)
+		time.Sleep(time.Second)
+		fmt.Println("working", id, "finished job", j)
+		results <- j * 2
+	}
+}
+
+// New worker function for WaitGroup
+func worker2(id int) {
+	fmt.Printf("Worker %d starting\n", id)
+
+	time.Sleep(time.Second)
+	fmt.Printf("Worker %d done\n", id)
+}
+
+
+//Creating Container struct for the Mutex
+type Container struct {
+	mu sync.Mutex
+	counters map[string]int
+}
+
+//Using Mutexes
+    func (c *Container) inc(name string) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.counters[name]++
+	}
 func main() {
 
 	sum(1, 2)
@@ -231,22 +265,146 @@ func main() {
 	time.Sleep(2 * time.Second)
 
 	//Using Tickers
-	// ticker := time.NewTicker(500 * time.Millisecond)
-	// dones := make(chan bool)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	dones := make(chan bool)
 
-	// go func() {
-	// 	for {
-	// 		select {
-	// 		case <-done:
-	// 			return
-	// 		case t := <-ticker.C:
-	// 			fmt.Println("Tick at", t)
-	// 		}
-	// 	}
-	// }()
+	go func() {
+		for {
+			select {
+			case <-dones:
+				return
+			case t := <-ticker.C:
+				fmt.Println("Tick at", t)
+			}
+		}
+	}()
 
-	// time.Sleep(1600 * time.Millisecond)
-	// ticker.Stop()
-	// dones <- true
-	// fmt.Println("Ticker Stopped")
+	time.Sleep(1600 * time.Millisecond)
+	ticker.Stop()
+	dones <- true
+	fmt.Println("Ticker Stopped")
+	// fmt.Scanln()
+
+	const numJobs = 5
+	//creating channel for jobs and result
+	jobs2 := make(chan int, numJobs)
+	resultss := make(chan int, numJobs)
+
+	//creating workers using a for loop and the worker function
+	for w := 1; w <= 3; w++ {
+		go worker(w, jobs2, resultss)
+	}
+
+	//Creating jobs by sending values into the channel with a for loop
+	for j := 1; j <= numJobs; j++ {
+		jobs2 <- j
+	}
+	close(jobs2)
+
+	for a := 1; a <= numJobs; a++ {
+		<-resultss
+	}
+
+	//Using WaitGroups
+	var wg sync.WaitGroup
+
+	for i := 1; i <= 5; i++ {
+		wg.Add(1)
+
+		i := i
+
+		go func() {
+			defer wg.Done()
+			worker2(i)
+		}()
+	}
+
+	wg.Wait()
+	//apply errgroup package
+	// Note that this approach has no straightforward way to propagate errors from workers.
+	//For more advanced use cases, consider using the errgroup package.
+
+	//Rate Limiting
+	//Important mechanism for controlling resource utilization
+	//and maintaining quality of service
+
+	requests := make(chan int, 5)
+	for i := 1; i <= 5; i++ {
+		requests <- i
+	}
+	close(requests)
+
+	limiter := time.Tick(200 * time.Millisecond)
+	// time.NewTicker()
+	for req := range requests {
+		<-limiter
+		fmt.Println("request", req, time.Now())
+	}
+
+	burstyLimiter := make(chan time.Time, 3)
+
+	for i := 0; i < 3; i++ {
+		burstyLimiter <- time.Now()
+	}
+
+	go func() {
+		for t := range time.Tick(200 * time.Millisecond) {
+			burstyLimiter <- t
+		}
+	}()
+
+	burstyRequests := make(chan int, 5)
+	for i := 1; i <= 5; i++ {
+		burstyRequests <- i
+	}
+
+	close(burstyRequests)
+	for req := range burstyRequests {
+		<-burstyLimiter
+		fmt.Println("request", req, time.Now())
+	}
+
+	//using Atomic Counters
+	var ops uint64
+	var op int64
+	// var wg sync.WaitGroup
+
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+
+		go func() {
+			for c := 0; c < 1000; c++ {
+				atomic.AddUint64(&ops, 1)
+				// atomic.LoadInt64(ops)
+				op++
+			}
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
+
+	fmt.Println("ops:", ops)
+	fmt.Println("op:", op)
+
+	//Using Mutexes
+	cs := Container{
+		counters: map[string]int{"a": 0, "b" : 0},
+	}
+
+	doIncrement := func(name string, n int) {
+		for i := 0; i < n; i++ {
+			cs.inc(name)
+		}
+		wg.Done()
+	}
+
+	wg.Add(3)
+	go doIncrement("a", 10000)
+	go doIncrement("b", 10000)
+	go doIncrement("a", 10000)
+
+
+	wg.Wait()
+	fmt.Println(cs.counters)
 }
